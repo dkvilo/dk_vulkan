@@ -1,0 +1,5 @@
+.vscode
+*.dSYM
+vk_app
+*.spv
+.DS_Store
