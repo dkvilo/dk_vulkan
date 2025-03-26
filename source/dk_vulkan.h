@@ -2,7 +2,7 @@
  *  $File: dk_vulkan.h
  *  $By: David Kviloria (dkvilo) & SKYSTAR GAMES Interactive david@skystargames.com
  *  $Created: 2025-03-22 04:26:31
- *  $Modified: 2025-03-24 23:10:21
+ *  $Modified: 2025-03-27 03:46:45
  */
 #ifndef __dk_vulkan
 #define __dk_vulkan
@@ -54,6 +54,8 @@ extern "C"
   } DK_vkUniformBufferObject;
 
 #define DK_VULKAN_MAX_FRAMES_IN_FLIGHT 2
+#define DK_VK_DEFAULT_FONT_LINE_SPACEING 1.2
+#define DK_VULKAN_DEFAULT_FONT_ATLAS_SIZE 1024
 
 #define MAX_BATCH_VERTICES 500000
 #define MAX_BATCH_INDICES 550000
@@ -188,20 +190,20 @@ extern "C"
 
   typedef struct
   {
-    stbtt_fontinfo  fontInfo;
-    unsigned char  *fontBuffer;
-    float           scale;
-    float           lineHeight;
-    int32_t         ascent;
-    int32_t         descent;
-    int32_t         lineGap;
-    DK_vkGlyphInfo *glyphs;
-    int32_t         firstChar;
-    int32_t         numChars;
-    DK_vkTexture    atlas;
-    int32_t         atlasWidth;
-    int32_t         atlasHeight;
-    bool            atlasCreated;
+    VkImage           image;
+    VkDeviceMemory    memory;
+    VkImageView       view;
+    VkSampler         sampler;
+    int32_t           width;
+    int32_t           height;
+    int32_t           channels;
+    bool              isActive;
+    uint32_t          samplerId;
+    stbtt_packedchar *char_data;
+    int32_t           base_size;
+    int32_t           ascent;
+    int32_t           descent;
+    int32_t           line_gap;
   } DK_vkFont;
 
   typedef struct
@@ -397,16 +399,18 @@ extern "C"
 
   DK_VULKAN_FUNC unsigned char *DK_vkReadFile( const char *filename, size_t *size );
 
-  DK_VULKAN_FUNC DK_vkFont DK_vkLoadFont( DK_vkApplication *app, const char *filename, float fontSize );
+  DK_VULKAN_FUNC DK_vkFont DK_vkLoadFont( DK_vkApplication *app, const char *filename, int32_t baseSize );
   DK_VULKAN_FUNC void      DK_vkUnloadFont( DK_vkApplication *app, DK_vkFont *font );
-  DK_VULKAN_FUNC void      DK_vkCreateFontAtlas( DK_vkApplication *app, DK_vkFont *font );
-  DK_VULKAN_FUNC void      DK_vkDrawText( DK_vkApplication *app,
-                                          DK_vkFont        *font,
-                                          const char       *text,
-                                          DK_vkVec2         position,
-                                          DK_vkColor        tint );
-  DK_VULKAN_FUNC float     DK_vkMeasureTextWidth( DK_vkFont *font, const char *text );
-  DK_VULKAN_FUNC float     DK_vkMeasureTextHeight( DK_vkFont *font, const char *text );
+
+  DK_VULKAN_FUNC void DK_vkDrawText( DK_vkApplication *app,
+                                     DK_vkFont        *font,
+                                     const char       *text,
+                                     DK_vkVec2         position,
+                                     float             fontSize,
+                                     DK_vkColor        tint );
+
+  DK_VULKAN_FUNC float DK_vkMeasureTextWidth( DK_vkFont *font, const char *text, float fontSize );
+  DK_VULKAN_FUNC float DK_vkMeasureTextHeight( DK_vkFont *font, const char *text, float fontSize );
 
 #define DK_VK_IMPLEMENTATION
 #ifdef DK_VK_IMPLEMENTATION
@@ -3502,129 +3506,53 @@ extern "C"
     DK_vkDrawTexturedQuad( app, position, size, uv1, uv2, tint, textureId );
   }
 
-  DK_VULKAN_FUNC DK_vkFont DK_vkLoadFont( DK_vkApplication *app, const char *filename, float fontSize )
+  DK_VULKAN_FUNC DK_vkFont DK_vkLoadFont( DK_vkApplication *app, const char *filename, int32_t baseSize )
   {
     DK_vkFont font = { 0 };
 
-    size_t size;
-    font.fontBuffer = DK_vkReadFile( filename, &size );
-    if ( !font.fontBuffer )
+    size_t         size;
+    unsigned char *fontBuffer = DK_vkReadFile( filename, &size );
+    if ( !fontBuffer )
     {
       fprintf( stderr, "Failed to load font: %s\n", filename );
       return font;
     }
 
-    if ( !stbtt_InitFont( &font.fontInfo, font.fontBuffer, 0 ) )
+    stbtt_fontinfo fontInfo;
+    if ( !stbtt_InitFont( &fontInfo, fontBuffer, 0 ) )
     {
       fprintf( stderr, "Failed to initialize font: %s\n", filename );
-      free( font.fontBuffer );
-      font.fontBuffer = NULL;
+      free( fontBuffer );
       return font;
     }
 
-    font.scale = stbtt_ScaleForPixelHeight( &font.fontInfo, fontSize );
-    stbtt_GetFontVMetrics( &font.fontInfo, &font.ascent, &font.descent, &font.lineGap );
-    font.ascent     = (int32_t)( font.ascent * font.scale );
-    font.descent    = (int32_t)( font.descent * font.scale );
-    font.lineGap    = (int32_t)( font.lineGap * font.scale );
-    font.lineHeight = ( font.ascent - font.descent + font.lineGap );
+    stbtt_GetFontVMetrics( &fontInfo, &font.ascent, &font.descent, &font.line_gap );
+    font.base_size = baseSize;
 
-    font.firstChar = 32;
-    font.numChars  = 95; // 126 - 32 + 1
+    font.width  = DK_VULKAN_DEFAULT_FONT_ATLAS_SIZE;
+    font.height = DK_VULKAN_DEFAULT_FONT_ATLAS_SIZE;
 
-    font.glyphs = (DK_vkGlyphInfo *)malloc( font.numChars * sizeof( DK_vkGlyphInfo ) );
-    memset( font.glyphs, 0, font.numChars * sizeof( DK_vkGlyphInfo ) );
+    font.char_data = (stbtt_packedchar *)calloc( 126, sizeof( stbtt_packedchar ) );
+    unsigned char *pixels = (unsigned char *)calloc( font.width * font.height, sizeof( char ) );
 
-    font.atlasCreated = false;
+    stbtt_pack_context packContext;
+    stbtt_PackBegin( &packContext, pixels, font.width, font.height, font.width, 1, NULL );
+    stbtt_PackFontRange( &packContext, fontBuffer, 0, baseSize, 0, 125, font.char_data );
+    stbtt_PackEnd( &packContext );
 
-    return font;
-  }
-
-  DK_VULKAN_FUNC void DK_vkCreateFontAtlas( DK_vkApplication *app, DK_vkFont *font )
-  {
-    if ( font->atlasCreated )
-      return;
-
-    int32_t totalWidth = 0;
-    int32_t maxHeight  = 0;
-
-    for ( int32_t i = 0; i < font->numChars; i++ )
+    unsigned char *pixelsRGBA = (unsigned char *)malloc( font.width * font.height * 4 );
+    for ( int i = 0; i < font.width * font.height; i++ )
     {
-      int32_t c = font->firstChar + i;
-
-      int32_t        width, height, xoff, yoff;
-      unsigned char *bitmap =
-          stbtt_GetCodepointBitmap( &font->fontInfo, 0, font->scale, c, &width, &height, &xoff, &yoff );
-
-      if ( bitmap )
-      {
-        int32_t advanceWidth, leftSideBearing;
-        stbtt_GetCodepointHMetrics( &font->fontInfo, c, &advanceWidth, &leftSideBearing );
-
-        font->glyphs[i].bitmap   = bitmap;
-        font->glyphs[i].width    = width;
-        font->glyphs[i].height   = height;
-        font->glyphs[i].xoff     = xoff;
-        font->glyphs[i].yoff     = yoff;
-        font->glyphs[i].xadvance = (int32_t)( advanceWidth * font->scale );
-
-        totalWidth += width + DK_VK_FONT_ATLAS_PADDING;
-        if ( height > maxHeight )
-          maxHeight = height;
-      }
+      pixelsRGBA[i * 4 + 0] = 255;
+      pixelsRGBA[i * 4 + 1] = 255;
+      pixelsRGBA[i * 4 + 2] = 255;
+      pixelsRGBA[i * 4 + 3] = pixels[i];
     }
 
-    maxHeight += 2;
-
-    int32_t atlasWidth = 1;
-    while ( atlasWidth < totalWidth )
-      atlasWidth *= 2;
-
-    int32_t atlasHeight = 1;
-    while ( atlasHeight < maxHeight )
-      atlasHeight *= 2;
-
-    font->atlasWidth  = atlasWidth;
-    font->atlasHeight = atlasHeight;
-
-    unsigned char *atlas = (unsigned char *)malloc( atlasWidth * atlasHeight );
-    memset( atlas, 0, atlasWidth * atlasHeight );
-
-    int32_t x = 0;
-    for ( int32_t i = 0; i < font->numChars; i++ )
-    {
-      DK_vkGlyphInfo *glyph = &font->glyphs[i];
-
-      if ( glyph->bitmap )
-      {
-        for ( int32_t row = 0; row < glyph->height; row++ )
-        {
-          for ( int32_t col = 0; col < glyph->width; col++ )
-          {
-            atlas[( row + 1 ) * atlasWidth + x + col + 1] = glyph->bitmap[row * glyph->width + col];
-          }
-        }
-
-        stbtt_FreeBitmap( glyph->bitmap, NULL );
-        glyph->bitmap = NULL;
-
-        x += glyph->width + 1;
-      }
-    }
-
-    unsigned char *atlasRGBA = (unsigned char *)malloc( atlasWidth * atlasHeight * 4 );
-    for ( int32_t i = 0; i < atlasWidth * atlasHeight; i++ )
-    {
-      atlasRGBA[i * 4 + 0] = 255;
-      atlasRGBA[i * 4 + 1] = 255;
-      atlasRGBA[i * 4 + 2] = 255;
-      atlasRGBA[i * 4 + 3] = atlas[i];
-    }
+    VkDeviceSize imageSize = font.width * font.height * 4;
 
     VkBuffer       stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
-    VkDeviceSize   imageSize = atlasWidth * atlasHeight * 4;
-
     DK_vkCreateBuffer( app,
                        imageSize,
                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -3634,192 +3562,190 @@ extern "C"
 
     void *data;
     vkMapMemory( app->device, stagingBufferMemory, 0, imageSize, 0, &data );
-    memcpy( data, atlasRGBA, imageSize );
+    memcpy( data, pixelsRGBA, imageSize );
     vkUnmapMemory( app->device, stagingBufferMemory );
 
-    free( atlasRGBA );
-    free( atlas );
+    free( pixelsRGBA );
+    free( pixels );
 
     DK_vkCreateImage( app,
-                      atlasWidth,
-                      atlasHeight,
+                      font.width,
+                      font.height,
                       VK_FORMAT_R8G8B8A8_SRGB,
                       VK_IMAGE_TILING_OPTIMAL,
                       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                      &font->atlas.image,
-                      &font->atlas.memory );
+                      &font.image,
+                      &font.memory );
 
     DK_vkTransitionImageLayout( app,
-                                font->atlas.image,
+                                font.image,
                                 VK_FORMAT_R8G8B8A8_SRGB,
                                 VK_IMAGE_LAYOUT_UNDEFINED,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
 
-    DK_vkCopyBufferToImage( app, stagingBuffer, font->atlas.image, atlasWidth, atlasHeight );
+    DK_vkCopyBufferToImage( app, stagingBuffer, font.image, font.width, font.height );
 
     DK_vkTransitionImageLayout( app,
-                                font->atlas.image,
+                                font.image,
                                 VK_FORMAT_R8G8B8A8_SRGB,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 
-    DK_vkCreateTextureImageView( app, font->atlas.image, &font->atlas.view );
-    DK_vkCreateTextureSampler( app, &font->atlas.sampler );
+    DK_vkCreateTextureImageView( app, font.image, &font.view );
+    DK_vkCreateTextureSampler( app, &font.sampler );
 
-    font->atlas.width    = atlasWidth;
-    font->atlas.height   = atlasHeight;
-    font->atlas.channels = 4;
+    font.channels = 4;
 
+    // register the font texture int the texture system
     if ( app->textureCount >= app->maxTextures )
     {
-      fprintf( stderr, "Maximum texture count reached, cannot add font atlas\n" );
+      fprintf( stderr, "Maximum texture count reached, cannot add font texture\n" );
       vkDestroyBuffer( app->device, stagingBuffer, NULL );
       vkFreeMemory( app->device, stagingBufferMemory, NULL );
-      vkDestroySampler( app->device, font->atlas.sampler, NULL );
-      vkDestroyImageView( app->device, font->atlas.view, NULL );
-      vkDestroyImage( app->device, font->atlas.image, NULL );
-      vkFreeMemory( app->device, font->atlas.memory, NULL );
-      return;
+      vkDestroySampler( app->device, font.sampler, NULL );
+      vkDestroyImageView( app->device, font.view, NULL );
+      vkDestroyImage( app->device, font.image, NULL );
+      vkFreeMemory( app->device, font.memory, NULL );
+      free( font.char_data );
+      free( fontBuffer );
+      return font;
     }
 
-    uint32_t atlasTextureId = app->textureCount++;
-    font->atlas.samplerId   = atlasTextureId;
+    uint32_t fontTextureId = app->textureCount++;
+    font.samplerId         = fontTextureId;
 
-    app->textures[atlasTextureId].image     = font->atlas.image;
-    app->textures[atlasTextureId].memory    = font->atlas.memory;
-    app->textures[atlasTextureId].view      = font->atlas.view;
-    app->textures[atlasTextureId].sampler   = font->atlas.sampler;
-    app->textures[atlasTextureId].width     = atlasWidth;
-    app->textures[atlasTextureId].height    = atlasHeight;
-    app->textures[atlasTextureId].channels  = 4;
-    app->textures[atlasTextureId].isActive  = true;
-    app->textures[atlasTextureId].samplerId = atlasTextureId;
+    app->textures[fontTextureId].image     = font.image;
+    app->textures[fontTextureId].memory    = font.memory;
+    app->textures[fontTextureId].view      = font.view;
+    app->textures[fontTextureId].sampler   = font.sampler;
+    app->textures[fontTextureId].width     = font.width;
+    app->textures[fontTextureId].height    = font.height;
+    app->textures[fontTextureId].channels  = 4;
+    app->textures[fontTextureId].isActive  = true;
+    app->textures[fontTextureId].samplerId = fontTextureId;
 
     DK_vkUpdateDescriptorSetWithTextures( app );
 
     vkDestroyBuffer( app->device, stagingBuffer, NULL );
     vkFreeMemory( app->device, stagingBufferMemory, NULL );
+    free( fontBuffer );
 
-    font->atlasCreated = true;
+    return font;
   }
 
   DK_VULKAN_FUNC void DK_vkUnloadFont( DK_vkApplication *app, DK_vkFont *font )
   {
-    if ( font->glyphs )
+    if ( font->char_data )
     {
-      free( font->glyphs );
-      font->glyphs = NULL;
+      free( font->char_data );
+      font->char_data = NULL;
     }
 
-    if ( font->fontBuffer )
-    {
-      free( font->fontBuffer );
-      font->fontBuffer = NULL;
-    }
-
-    if ( font->atlasCreated )
-    {
-      DK_vkDestroyTexture( app, &font->atlas );
-      font->atlasCreated = false;
-    }
+    // Note: (David) DK_vkDestroyTexture is called when cleaning up the application
+    font->image   = VK_NULL_HANDLE;
+    font->memory  = VK_NULL_HANDLE;
+    font->view    = VK_NULL_HANDLE;
+    font->sampler = VK_NULL_HANDLE;
   }
-
-  DK_VULKAN_FUNC float DK_vkMeasureTextWidth( DK_vkFont *font, const char *text )
+  DK_VULKAN_FUNC float DK_vkMeasureTextWidth( DK_vkFont *font, const char *text, float fontSize )
   {
-    float size = 0.0f;
-    if ( !text || !font || !font->glyphs )
-      return size;
+    if ( !text || !font || !font->char_data )
+      return 0.0f;
 
-    float textWidth = 0;
+    float scale = fontSize / font->base_size;
+    float width = 0.0f;
 
-    const char *c = text;
-    while ( *c )
+    for ( int i = 0; i < strlen( text ); i++ )
     {
-      if ( *c >= font->firstChar && *c < font->firstChar + font->numChars )
+      if ( text[i] == '\n' )
       {
-        int32_t index = *c - font->firstChar;
-        textWidth += font->glyphs[index].xadvance;
+        continue;
       }
-      c++;
+
+      int char_index = text[i];
+      if ( char_index >= 0 && char_index < 126 )
+      {
+        stbtt_packedchar c = font->char_data[char_index];
+        width += c.xadvance * scale;
+      }
     }
 
-    size = textWidth;
-    return size;
+    return width;
   }
 
-  DK_VULKAN_FUNC float DK_vkMeasureTextHeight( DK_vkFont *font, const char *text )
+  DK_VULKAN_FUNC float DK_vkMeasureTextHeight( DK_vkFont *font, const char *text, float fontSize )
   {
-    float size = 0.0f;
-    if ( !text || !font || !font->glyphs )
-      return size;
+    if ( !text || !font || !font->char_data )
+      return 0.0f;
 
-    float textHeight = font->lineHeight;
-    return textHeight;
+    float lineHeight = fontSize * DK_VK_DEFAULT_FONT_LINE_SPACEING;
+    int   lineCount  = 1;
+
+    for ( const char *ptr = text; *ptr != '\0'; ++ptr )
+    {
+      if ( *ptr == '\n' )
+      {
+        ++lineCount;
+      }
+    }
+
+    return lineCount * lineHeight;
   }
 
   DK_VULKAN_FUNC void DK_vkDrawText( DK_vkApplication *app,
                                      DK_vkFont        *font,
                                      const char       *text,
                                      DK_vkVec2         position,
+                                     float             fontSize,
                                      DK_vkColor        tint )
   {
-    if ( !text || !font || !font->glyphs )
+    if ( !text || !font || !font->char_data )
       return;
-
-    if ( !font->atlasCreated )
-    {
-      DK_vkCreateFontAtlas( app, font );
-    }
 
     DK_vkTexture *prevTexture   = app->currentTexture;
     int32_t       prevSamplerId = prevTexture ? prevTexture->samplerId : 0;
 
-    DK_vkSetTexture( app, font->atlas.samplerId );
+    DK_vkSetTexture( app, font->samplerId );
+
+    float scale       = fontSize / font->base_size;
+    float lineSpacing = fontSize * DK_VK_DEFAULT_FONT_LINE_SPACEING;
 
     float x = position[0];
-    float y = position[1] + font->ascent;
+    float y = position[1] + ( lineSpacing * 0.5 );
 
-    int32_t     xPos = 0;
-    const char *c    = text;
-    while ( *c )
+    for ( int i = 0; i < strlen( text ); i++ )
     {
-      if ( *c >= font->firstChar && *c < font->firstChar + font->numChars )
+      if ( text[i] == '\n' )
       {
-        int32_t         index = *c - font->firstChar;
-        DK_vkGlyphInfo *glyph = &font->glyphs[index];
-
-        int32_t totalOffset = 0;
-        for ( int32_t i = 0; i < index; i++ )
-        {
-          if ( font->glyphs[i].width > 0 )
-          {
-            totalOffset += font->glyphs[i].width + DK_VK_FONT_ATLAS_PADDING;
-          }
-        }
-
-        if ( glyph->width > 0 && glyph->height > 0 )
-        {
-
-          float u0 = (float)( totalOffset + 1 ) / (float)font->atlasWidth;
-          float v0 = 1.0f / (float)font->atlasHeight;
-          float u1 = (float)( totalOffset + 1 + glyph->width ) / (float)font->atlasWidth;
-          float v1 = (float)( 1 + glyph->height ) / (float)font->atlasHeight;
-
-          float xpos = x + glyph->xoff;
-          float ypos = y + glyph->yoff;
-
-          DK_vkVec2 pos  = { xpos, ypos };
-          DK_vkSize size = { (float)glyph->width, (float)glyph->height };
-          DK_vkVec2 uv1  = { u0, v0 };
-          DK_vkVec2 uv2  = { u1, v1 };
-
-          DK_vkDrawTexturedQuad( app, pos, size, uv1, uv2, tint, font->atlas.samplerId );
-        }
-
-        x += glyph->xadvance;
+        x = position[0];
+        y += lineSpacing;
+        continue;
       }
-      c++;
+
+      int char_index = text[i];
+      if ( char_index >= 0 && char_index < 126 )
+      {
+        stbtt_packedchar c = font->char_data[char_index];
+
+        float x0 = c.x0 / (float)font->width;
+        float y0 = c.y0 / (float)font->height;
+        float x1 = c.x1 / (float)font->width;
+        float y1 = c.y1 / (float)font->height;
+
+        DK_vkVec2 uv1 = { x0, y0 };
+        DK_vkVec2 uv2 = { x1, y1 };
+
+        float charWidth  = ( c.xoff2 - c.xoff ) * scale;
+        float charHeight = ( c.yoff2 - c.yoff ) * scale;
+
+        DK_vkVec2 pos  = { x + c.xoff * scale, y + c.yoff * scale };
+        DK_vkSize size = { charWidth, charHeight };
+
+        DK_vkDrawTexturedQuad( app, pos, size, uv1, uv2, tint, font->samplerId );
+
+        x += c.xadvance * scale;
+      }
     }
 
     if ( prevTexture )
