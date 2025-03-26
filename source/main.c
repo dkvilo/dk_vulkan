@@ -2,7 +2,7 @@
  *  $File: main.c
  *  $By: David Kviloria (dkvilo) & SKYSTAR GAMES Interactive david@skystargames.com
  *  $Created: 2025-03-21 16:31:43
- *  $Modified: 2025-03-24 23:10:29
+ *  $Modified: 2025-03-27 03:46:47
  */
 #define DK_VULKAN_IMPLEMENTATION
 #include "dk_vulkan.h"
@@ -20,23 +20,22 @@ int main()
   uint32_t texture0SamplerId = DK_vkAddTexture( &app, "res/textures/uv.jpg" );
   uint32_t texture1SamplerId = DK_vkAddTexture( &app, "res/textures/Vulkan_logo.png" );
 
-  DK_vkFont font = DK_vkLoadFont( &app, "res/fonts/Alegreya-Regular.ttf", 90.0f );
-  DK_vkCreateFontAtlas( &app, &font );
+  DK_vkFont font = DK_vkLoadFont( &app, "res/fonts/Alegreya-Regular.ttf", 120.0f );
 
   double current = glfwGetTime();
   double prev    = current;
   double delta   = 0.0;
 
-  float scaleX, scaleY;
-  DK_vkGetWindowScale( &app, &scaleX, &scaleY );
+  float scaleFactorX, scaleFactorY;
+  DK_vkGetWindowScale( &app, &scaleFactorX, &scaleFactorY );
 
   while ( !glfwWindowShouldClose( app.window ) )
   {
     double mouseX, mouseY;
     glfwGetCursorPos( app.window, &mouseX, &mouseY );
 
-    mouseX *= scaleX;
-    mouseY *= scaleY;
+    mouseX *= scaleFactorX;
+    mouseY *= scaleFactorX;
 
     float aspectRatio = app.screenWidth / app.screenHeight;
 
@@ -124,32 +123,38 @@ int main()
         sprintf( buffer, "ms: 0.00, fps 0.00" );
       }
 
-      DK_vkVec2 position = { 20, 10 };
-
+      float      fontSize    = 40.0f * scaleFactorX;
+      DK_vkVec2  position    = { 20, 10 };
+      float      padding     = 20.0f;
       float      bgRoundness = 20.0f;
       int32_t    bgSegments  = 128;
       DK_vkColor bgTint      = { 0.0f, 0.0f, 0.0f, 0.8f };
       DK_vkSize  bgSize      = {
-          DK_vkMeasureTextWidth( &font, buffer ) + 20,
-          DK_vkMeasureTextHeight( &font, buffer ),
+          DK_vkMeasureTextWidth( &font, buffer, fontSize ) + padding,
+          ( DK_vkMeasureTextHeight( &font, buffer, fontSize ) * 0.5 ) + padding,
       };
 
-      DK_vkVec2 bgPos = { position[0] - 10, position[1] };
+      DK_vkVec2 bgPos = { position[0] - (padding * 0.5f), position[1] };
       DK_vkDrawRoundedRectangle( &app, bgPos, bgSize, bgRoundness, bgTint, bgSegments );
 
       DK_vkVec2  textPos        = { position[0] + 2, position[1] + 2 };
       DK_vkColor textTint       = { 0.0f, 1.0f, 0.0f, 1.0f };
       DK_vkColor textShadowTint = { 0.0f, 0.0f, 0.0f, 1.0f };
 
-      DK_vkDrawText( &app, &font, buffer, position, textShadowTint ); // @shadow
-      DK_vkDrawText( &app, &font, buffer, textPos, textTint );
+      DK_vkDrawText( &app, &font, buffer, position, fontSize, textShadowTint ); // @shadow
+      DK_vkDrawText( &app, &font, buffer, textPos, fontSize, textTint );
     }
 
+    DK_vkColor tint     = { 1.0f, 0.0f, 0.0f, 1.0f };
+    DK_vkVec2  position = { mouseX, mouseY };
     {
-      DK_vkVec2  position = { mouseX, mouseY };
-      DK_vkColor tint     = { 1.0f, 0.0f, 0.0f, 1.0f };
       DK_vkDrawCircle( &app, position, 10.0f, tint, 32 );
     }
+
+    float fontSize = 60.0f * scaleFactorX;
+    DK_vkDrawText( &app, &font, "Hello World", position, fontSize, tint );
+    float width  = DK_vkMeasureTextWidth( &font, "Hello World", fontSize );
+    float height = DK_vkMeasureTextHeight( &font, "Hello World", fontSize );
 
     DK_vkEndBatch( &app );
 
