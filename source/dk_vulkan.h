@@ -2,7 +2,7 @@
  *  $File: dk_vulkan.h
  *  $By: David Kviloria (dkvilo) & SKYSTAR GAMES Interactive david@skystargames.com
  *  $Created: 2025-03-22 04:26:31
- *  $Modified: 2025-03-27 03:46:45
+ *  $Modified: 2025-03-27 18:45:44
  */
 #ifndef __dk_vulkan
 #define __dk_vulkan
@@ -3341,39 +3341,92 @@ extern "C"
     float dy     = end[1] - begin[1];
     float length = sqrtf( dx * dx + dy * dy );
 
-    if ( length > 0.0f )
+    if ( length < 0.001f )
     {
-      dx /= length;
-      dy /= length;
+      DK_vkDrawRectangle( app,
+                          (DK_vkVec2){ begin[0] - thickness / 2, begin[1] - thickness / 2 },
+                          (DK_vkSize){ thickness, thickness },
+                          tint );
+      return;
     }
 
-    float px = -dy;
-    float py = dx;
+    float nx = dx / length;
+    float ny = dy / length;
 
-    float halfThickness = thickness * 0.5f;
+    // perpendicular vector (rotated 90 degrees)
+    float px = -ny;
+    float py = nx;
+    float ht = thickness * 0.5f;
 
-    // tl
-    float tlx = begin[0] + px * halfThickness;
-    float tly = begin[1] + py * halfThickness;
+    DK_vkRenderer *renderer = &app->batchRenderer;
+    if ( !renderer->hasBegun )
+    {
+      DK_vkBeginBatch( app );
+    }
 
-    // tr
-    float trx = end[0] + px * halfThickness;
-    float try = end[1] + py * halfThickness;
+    if ( renderer->vertexCount + 4 > MAX_BATCH_VERTICES || renderer->indexCount + 6 > MAX_BATCH_INDICES )
+    {
+      DK_vkFlushBatch( app );
+      DK_vkBeginBatch( app );
+    }
 
-    // br
-    float brx = end[0] - px * halfThickness;
-    float bry = end[1] - py * halfThickness;
+    uint32_t baseIndex = renderer->vertexCount;
 
     // bl
-    float blx = begin[0] - px * halfThickness;
-    float bly = begin[1] - py * halfThickness;
+    DK_vkAddVertex( renderer,
+                    begin[0] - px * ht,
+                    begin[1] - py * ht,
+                    tint[0],
+                    tint[1],
+                    tint[2],
+                    tint[3],
+                    0.0f,
+                    0.0f,
+                    -1 );
 
-    DK_vkVec2 p1 = { tlx, tly };
-    DK_vkVec2 p2 = { trx, try };
-    DK_vkVec2 p3 = { brx, bry };
-    DK_vkVec2 p4 = { blx, bly };
+    // br
+    DK_vkAddVertex( renderer,
+                    end[0] - px * ht,
+                    end[1] - py * ht,
+                    tint[0],
+                    tint[1],
+                    tint[2],
+                    tint[3],
+                    1.0f,
+                    0.0f,
+                    -1 );
 
-    DK_vkDrawQuad( app, p1, p2, p3, p4, tint );
+    // tr
+    DK_vkAddVertex( renderer,
+                    end[0] + px * ht,
+                    end[1] + py * ht,
+                    tint[0],
+                    tint[1],
+                    tint[2],
+                    tint[3],
+                    1.0f,
+                    1.0f,
+                    -1 );
+
+    // tl
+    DK_vkAddVertex( renderer,
+                    begin[0] + px * ht,
+                    begin[1] + py * ht,
+                    tint[0],
+                    tint[1],
+                    tint[2],
+                    tint[3],
+                    0.0f,
+                    1.0f,
+                    -1 );
+
+    DK_vkAddIndex( renderer, baseIndex );
+    DK_vkAddIndex( renderer, baseIndex + 1 );
+    DK_vkAddIndex( renderer, baseIndex + 2 );
+
+    DK_vkAddIndex( renderer, baseIndex );
+    DK_vkAddIndex( renderer, baseIndex + 2 );
+    DK_vkAddIndex( renderer, baseIndex + 3 );
   }
 
   DK_VULKAN_FUNC void DK_vkDrawTexturedQuad( DK_vkApplication *app,
@@ -3532,7 +3585,7 @@ extern "C"
     font.width  = DK_VULKAN_DEFAULT_FONT_ATLAS_SIZE;
     font.height = DK_VULKAN_DEFAULT_FONT_ATLAS_SIZE;
 
-    font.char_data = (stbtt_packedchar *)calloc( 126, sizeof( stbtt_packedchar ) );
+    font.char_data        = (stbtt_packedchar *)calloc( 126, sizeof( stbtt_packedchar ) );
     unsigned char *pixels = (unsigned char *)calloc( font.width * font.height, sizeof( char ) );
 
     stbtt_pack_context packContext;
