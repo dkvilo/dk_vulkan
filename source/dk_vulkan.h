@@ -18,6 +18,11 @@ extern "C"
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <math.h>
+
+#if !defined( M_PI )
+#define M_PI 3.14
+#endif
 
 #define DK_VK_USE_GLFW
 
@@ -305,7 +310,6 @@ extern "C"
   DK_VULKAN_FUNC uint32_t DK_vkAddTexture( DK_vkApplication *app, const char *filename );
   DK_VULKAN_FUNC void     DK_vkSetTexture( DK_vkApplication *app, uint32_t textureId );
   DK_VULKAN_FUNC void     DK_vkUpdateDescriptorSetWithTexture( DK_vkApplication *app, DK_vkTexture *texture );
-  DK_VULKAN_FUNC void     DK_vkCreateDescriptorPoolWithTextures( DK_vkApplication *app );
 
   DK_VULKAN_FUNC void
   DK_vkDrawTriangle( DK_vkApplication *app, DK_vkVec2 p1, DK_vkVec2 p2, DK_vkVec3 p3, DK_vkColor tint );
@@ -420,10 +424,12 @@ extern "C"
 
   const char *deviceExtensions[] = {
       VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+#if defined( __APPLE__ )
       "VK_KHR_portability_subset",
+#endif
   };
 
-  const int32_t deviceExtensionCount = 2;
+  const int32_t deviceExtensionCount = sizeof( deviceExtensions ) / sizeof( deviceExtensions[0] );
 
 #ifdef NDEBUG
   const bool enableValidationLayers = false;
@@ -1224,7 +1230,7 @@ extern "C"
 
     if ( app->physicalDevice == VK_NULL_HANDLE )
     {
-      fprintf( stderr, "Failed to find a suitable GPU\n" );
+      fprintf( stderr, "Failed to find a suitable GPU %u\n", deviceCount );
       exit( 1 );
     }
   }
@@ -2156,8 +2162,8 @@ extern "C"
     VkSamplerCreateInfo samplerInfo = {};
     samplerInfo.sType               = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
 
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -2171,7 +2177,7 @@ extern "C"
     samplerInfo.compareEnable           = VK_FALSE;
 
     samplerInfo.compareOp  = VK_COMPARE_OP_ALWAYS;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     samplerInfo.mipLodBias = 0.0f;
     samplerInfo.minLod     = 0.0f;
     samplerInfo.maxLod     = 0.0f;
@@ -2807,29 +2813,6 @@ extern "C"
     descriptorWrites[1].pImageInfo      = &imageInfo;
 
     vkUpdateDescriptorSets( app->device, 2, descriptorWrites, 0, NULL );
-  }
-
-  DK_VULKAN_FUNC void DK_vkCreateDescriptorPoolWithTextures( DK_vkApplication *app )
-  {
-    VkDescriptorPoolSize poolSizes[2] = {};
-
-    poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = 1;
-
-    poolSizes[1].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = app->maxTextures;
-
-    VkDescriptorPoolCreateInfo poolInfo = { 0 };
-    poolInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount              = 2;
-    poolInfo.pPoolSizes                 = poolSizes;
-    poolInfo.maxSets                    = 1;
-
-    if ( vkCreateDescriptorPool( app->device, &poolInfo, NULL, &app->descriptorPool ) != VK_SUCCESS )
-    {
-      fprintf( stderr, "Failed to create descriptor pool\n" );
-      exit( 1 );
-    }
   }
 
   DK_VULKAN_FUNC void DK_vkFlushBatch( DK_vkApplication *app )

@@ -11,16 +11,15 @@ int main()
 {
   DK_vkApplication app = { 0 };
 
-  int32_t windowWidth  = 800;
-  int32_t windowHeight = 600;
+  int32_t windowWidth  = 1080;
+  int32_t windowHeight = 720;
 
   DK_vkInitApp( &app, windowWidth, windowHeight, "MoltenVK Renderer" );
   DK_vkInitTextureSystem( &app );
 
-  uint32_t texture0SamplerId = DK_vkAddTexture( &app, "res/textures/uv.jpg" );
-  uint32_t texture1SamplerId = DK_vkAddTexture( &app, "res/textures/Vulkan_logo.png" );
-
-  DK_vkFont font = DK_vkLoadFont( &app, "res/fonts/Alegreya-Regular.ttf", 120.0f );
+  uint32_t  texture0SamplerId = DK_vkAddTexture( &app, "res/textures/uv.jpg" );
+  uint32_t  texture1SamplerId = DK_vkAddTexture( &app, "res/textures/Vulkan_logo.png" );
+  DK_vkFont font              = DK_vkLoadFont( &app, "res/fonts/Alegreya-Regular.ttf", 120.0f );
 
   double current = glfwGetTime();
   double prev    = current;
@@ -134,7 +133,7 @@ int main()
           ( DK_vkMeasureTextHeight( &font, buffer, fontSize ) * 0.5 ) + padding,
       };
 
-      DK_vkVec2 bgPos = { position[0] - (padding * 0.5f), position[1] };
+      DK_vkVec2 bgPos = { position[0] - ( padding * 0.5f ), position[1] };
       DK_vkDrawRoundedRectangle( &app, bgPos, bgSize, bgRoundness, bgTint, bgSegments );
 
       DK_vkVec2  textPos        = { position[0] + 2, position[1] + 2 };
