@@ -2,7 +2,7 @@
  *  $File: dk_vulkan.h
  *  $By: David Kviloria (dkvilo) & SKYSTAR GAMES Interactive david@skystargames.com
  *  $Created: 2025-03-22 04:26:31
- *  $Modified: 2025-03-27 18:45:44
+ *  $Modified: 2025-08-25 23:04:39
  */
 #ifndef __dk_vulkan
 #define __dk_vulkan
@@ -741,29 +741,19 @@ extern "C"
   DK_VULKAN_FUNC void DK_vkUpdateUniformBuffer( DK_vkApplication *app )
   {
     DK_vkUniformBufferObject ubo  = { 0 };
-    float                    rotX = 0.0f;
-
-    float cosVal = cos( rotX );
-    float sinVal = sin( rotX );
-
-    ubo.model[0][0] = cosVal;
-    ubo.model[0][1] = -sinVal;
-    ubo.model[1][0] = sinVal;
-    ubo.model[1][1] = cosVal;
-    ubo.model[2][2] = 1.0f;
-    ubo.model[3][3] = 1.0f;
-
+    DK_vkIdentityMatrix( ubo.model );
     DK_vkIdentityMatrix( ubo.view );
-    DK_vkOrtho( app->camera.left,
-                app->camera.right,
-                app->camera.bottom,
-                app->camera.top,
-                app->camera.near,
-                app->camera.far,
-                ubo.proj );
+    DK_vkIdentityMatrix( ubo.proj );
+    DK_vkOrtho( app->camera.left, app->camera.right, app->camera.bottom, app->camera.top, app->camera.near, app->camera.far, ubo.proj );
 
     void *data;
-    vkMapMemory( app->device, app->uniformBufferMemory, 0, sizeof( ubo ), 0, &data );
+    VkResult result = vkMapMemory( app->device, app->uniformBufferMemory, 0, sizeof( ubo ), 0, &data );
+    if ( result != VK_SUCCESS )
+    {
+      fprintf( stderr, "Failed to map uniform buffer memory\n" );
+      exit( 1 );
+    }
+    
     memcpy( data, &ubo, sizeof( ubo ) );
     vkUnmapMemory( app->device, app->uniformBufferMemory );
   }
