@@ -3,3 +3,8 @@
 vk_app
 *.spv
 .DS_Store
+dk_disk
+dk_hex
+dk_sand
+dk_ui
+examples/*
